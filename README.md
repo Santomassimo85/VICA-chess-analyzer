@@ -95,3 +95,56 @@ streamlit run src/app.py
 ---
 
 ## Project Structure
+
+Chess-vision/
+├── src/
+│   ├── piece_classifier.py
+│   ├── board_analyzer.py
+│   ├── fen_builder.py
+│   ├── rule_checker.py
+│   ├── chess_advisor.py
+│   ├── main.py
+│   └── app.py                 # Streamlit web app
+├── notebooks/
+├── models/                    # see step 3 (Hugging Face)
+├── engine/                    # see step 4 (Stockfish)
+├── data/
+├── docs/                      # Technical Analysis Document (PDF)
+├── requirements.txt
+└── README.md
+
+---
+
+## Model Training
+
+The classifier was trained on Google Colab using transfer learning from an
+ImageNet-pretrained ResNet-18. Two models were produced:
+
+- physical-piece model (~85% test accuracy)
+- digital-piece model (synthetic dataset)
+
+**Training notebook (Google Colab):**
+<https://colab.research.google.com/drive/1AloU4KelGsZWzucMlHSvW4gwhdM-6pz9?usp=sharing>
+
+---
+
+## Summary of Results
+
+- ~85% per-class test accuracy on the physical-piece dataset
+- Full pipeline reconstructs in-domain positions and returns engine analysis
+- Performance degrades on out-of-domain inputs due to **domain shift** —
+  discussed in the Technical Analysis Document
+
+---
+
+## Documentation
+
+Complete **Technical Analysis Document** in `docs/VICA_Technical_Analysis.pdf`.
+
+---
+
+## Ethical Note
+
+VICA is intended for **post-game analysis, study, and training only**. Using
+chess-engine assistance during live rated games violates the rules of all
+major chess platforms and federations.
