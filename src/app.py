@@ -1,0 +1,182 @@
+"""
+app.py
+Streamlit web interface for VICA - Visual Chess Analyzer.
+Nature-green themed, reusing the existing pipeline modules.
+
+Run with:  streamlit run src/app.py
+"""
+
+import streamlit as st
+import cv2
+import numpy as np
+from pathlib import Path
+from PIL import Image
+
+from board_analyzer import BoardAnalyzer
+from fen_builder import build_fen, build_color_matrix
+from chess_advisor import ChessAdvisor
+from rule_checker import check_position, correct_position
+
+# ---------- PATHS ----------
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+MODEL_PATH = PROJECT_ROOT / "models" / "chess_classifier_digital.pth"
+ENGINE_PATH = PROJECT_ROOT / "engine" / "stockfish.exe"
+
+
+# ---------- HELPERS ----------
+def flip_board(board_matrix):
+    return [row[::-1] for row in board_matrix[::-1]]
+
+
+def fen_to_grid(fen):
+    placement = fen.split()[0]
+    grid = []
+    for row in placement.split('/'):
+        line = []
+        for ch in row:
+            if ch.isdigit():
+                line.extend(['.'] * int(ch))
+            else:
+                line.append(ch)
+        grid.append(line)
+    return grid
+
+
+@st.cache_resource
+def load_analyzer():
+    return BoardAnalyzer(str(MODEL_PATH))
+
+
+# ---------- PAGE SETUP ----------
+st.set_page_config(page_title="VICA - Visual Chess Analyzer",
+                   page_icon="🌿", layout="centered")
+
+# Custom CSS for a softer, nature-themed look
+st.markdown("""
+<style>
+    .stApp { background-color: #f4f9f4; }
+    h1 { color: #2e7d32 !important; }
+    h2, h3 { color: #1b5e20 !important; }
+    .stButton button {
+        background-color: #2e7d32; color: white;
+        border-radius: 10px; border: none; font-weight: 600;
+        padding: 0.5rem 1.5rem;
+    }
+    .stButton button:hover { background-color: #1b5e20; color: white; }
+    div[data-testid="stMetric"] {
+        background-color: #e3f1e3; border-radius: 12px;
+        padding: 12px; border: 1px solid #c5e1c5;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ---------- HEADER ----------
+st.title("🌿 VICA")
+st.subheader("Visual Chess Analyzer")
+st.markdown(
+    "Upload a screenshot of a digital chess board. VICA detects the "
+    "position, builds the FEN notation, and uses the **Stockfish** engine "
+    "to suggest the best move.")
+st.divider()
+
+# ---------- STEP 1: UPLOAD ----------
+st.markdown("### 1 · Upload your board")
+uploaded = st.file_uploader(
+    "Choose a chess board screenshot (PNG or JPG)",
+    type=['png', 'jpg', 'jpeg'])
+
+if uploaded is not None:
+    pil_image = Image.open(uploaded).convert("RGB")
+    st.image(pil_image, caption="Uploaded board", width=300)
+
+    # ---------- STEP 2: SETTINGS (now in main page) ----------
+    st.markdown("### 2 · Game settings")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        turn_choice = st.selectbox(
+            "Whose turn is it to move?", ["White", "Black"])
+    with col_b:
+        orientation = st.selectbox(
+            "Which colour is at the bottom of the image?",
+            ["White (standard)", "Black (flipped)"])
+
+    side = 'w' if turn_choice == "White" else 'b'
+    black_at_bottom = (orientation == "Black (flipped)")
+
+    # ---------- STEP 3: ANALYSE ----------
+    st.markdown("### 3 · Run the analysis")
+    if st.button("🌿 Analyse position", type="primary"):
+
+        board_img = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+
+        with st.spinner("Analysing the board, please wait..."):
+            analyzer = load_analyzer()
+            board_matrix, conf_matrix = analyzer.analyze_board(board_img)
+
+            squares = analyzer.split_into_squares(board_img)
+            square_grid = [[None] * 8 for _ in range(8)]
+            for sq in squares:
+                square_grid[sq['row']][sq['col']] = sq['image']
+
+            if black_at_bottom:
+                board_matrix = flip_board(board_matrix)
+                square_grid = [row[::-1] for row in square_grid[::-1]]
+
+            color_matrix = build_color_matrix(board_matrix, square_grid)
+            warnings = check_position(board_matrix, color_matrix)
+            board_matrix, corrections = correct_position(
+                board_matrix, color_matrix, conf_matrix)
+
+            fen = build_fen(board_matrix, square_grid, side_to_move=side)
+
+            advisor = ChessAdvisor(str(ENGINE_PATH), think_time=1.0)
+            result = advisor.analyze(fen)
+
+        # ---------- RESULTS ----------
+        st.divider()
+        st.markdown("### 🪵 Detected Position")
+
+        grid = fen_to_grid(fen)
+        board_text = ""
+        for i, row in enumerate(grid):
+            board_text += f"{8-i}  " + "  ".join(row) + "\n"
+        board_text += "   a  b  c  d  e  f  g  h"
+        st.code(board_text, language=None)
+        st.caption("UPPERCASE = White pieces · lowercase = black pieces")
+
+        st.text_input("FEN notation", value=fen)
+
+        if warnings:
+            st.warning("Rule check: " + "; ".join(warnings))
+        if corrections:
+            st.info("Auto-corrections: " + "; ".join(corrections))
+
+        # ---------- ENGINE RESULT ----------
+        st.divider()
+        st.markdown("### 🌳 Engine Analysis")
+
+        if not result['valid']:
+            st.error(f"Could not analyse: {result['error']}")
+            st.markdown(
+                "This usually means a piece was misclassified. "
+                "Try a clearer screenshot, cropped tightly to the board.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Turn", result['turn'])
+            c2.metric("Evaluation", result['eval_text'])
+            c3.metric("Best move", result['best_move_san'])
+            st.success(f"🌿 Recommended move: **{result['best_move_san']}** "
+                       f"({result['best_move']})")
+
+        st.caption("Tip: paste the FEN into lichess.org/analysis to verify.")
+
+else:
+    st.info("⬆️ Upload a chess board screenshot above to begin.")
+
+# ---------- FOOTER ----------
+st.divider()
+st.caption(
+    "🌱 VICA is intended for post-game analysis and study only. "
+    "Using engine assistance during live rated games violates the "
+    "rules of chess platforms and federations.")
