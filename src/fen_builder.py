@@ -1,17 +1,25 @@
 """
 fen_builder.py
-Converts a detected board (8x8 matrix + square images)
-into a FEN string for chess engines.
 
-The CNN gives piece TYPE; this module adds piece COLOR
-via a classical brightness check, then assembles FEN.
+Generate a FEN (Forsyth–Edwards Notation) string from a detected
+chess board. The board detector or classifier provides the piece
+type for each square; this module determines piece color from the
+square image and assembles the final FEN placement string.
+
+The color detection is a simple, classical image processing approach:
+it isolates the piece region in the square and decides whether the
+piece body is predominantly light (white pieces) or dark (black
+pieces). This file does not perform piece recognition; it only
+combines type and color into a standard FEN.
 """
 
 import cv2
 import numpy as np
 
 
-# Map piece type -> FEN letter (uppercase = white, we lowercase for black)
+# Map piece type to its FEN letter. The mapping here uses the
+# canonical uppercase letters; the case is changed later based on
+# detected piece color (uppercase for White, lowercase for Black).
 PIECE_TO_FEN = {
     'Pawn': 'P', 'Knight': 'N', 'Bishop': 'B',
     'Rook': 'R', 'Queen': 'Q', 'King': 'K'
@@ -20,42 +28,51 @@ PIECE_TO_FEN = {
 
 def detect_piece_color(square_image):
     """
-    Decide if a piece is white or black.
+    Determine whether a piece in a square image is white or black.
 
-    Strategy: a piece has a black outline and a colored body.
-    We isolate the piece from the square background, then check
-    whether the piece BODY is mostly light (white) or dark (black).
+    This function crops the central area of the square (where the
+    piece body is expected), converts it to grayscale, and finds
+    edges to localize the piece. It then inspects pixel intensities
+    within the localized region to decide if the piece body is
+    predominantly light or dark.
 
-    Returns 'white' or 'black'.
+    Returns:
+        'white' or 'black'
     """
-    # Crop the center 60% (the piece body, ignore square corners)
+    # Crop the central region of the square where a piece is most
+    # likely to appear. This reduces influence from square borders
+    # and background.
     h, w = square_image.shape[:2]
     m_h, m_w = int(h * 0.20), int(w * 0.20)
     center = square_image[m_h:h - m_h, m_w:w - m_w]
 
     gray = cv2.cvtColor(center, cv2.COLOR_BGR2GRAY)
 
-    # Step 1: find the piece pixels (the piece differs from the
-    # uniform background). Use edges to locate the piece region.
+    # Step 1: find the piece pixels by detecting edges. The piece
+    # typically contrasts with the board background, so edge
+    # detection helps locate its outline.
     edges = cv2.Canny(gray, 40, 120)
-    # Dilate so the edge outline becomes a filled-ish region
+    # Dilate the edge map to form a filled-like mask for the piece
+    # region (so we can sample interior pixels reliably).
     kernel = np.ones((7, 7), np.uint8)
     piece_region = cv2.dilate(edges, kernel, iterations=2)
 
-    # Step 2: get the pixels INSIDE the piece region
+    # Step 2: extract grayscale pixels that fall inside the piece mask
     piece_pixels = gray[piece_region > 0]
 
-    # Safety: if we found almost no piece pixels, fall back
+    # Safety fallback: if the edge-based mask yields too few pixels
+    # (for example the piece is small or edges failed), use a simple
+    # brightness comparison on the cropped center instead.
     if piece_pixels.size < 20:
         # Fallback: compare extremes in the whole center
         bright = np.count_nonzero(gray > 170)
         dark = np.count_nonzero(gray < 90)
         return 'white' if bright >= dark else 'black'
 
-    # Step 3: within the piece, count bright vs dark pixels.
-    # A white piece body is light grey/white; a black piece
-    # body is dark grey/black. The outline is dark for both,
-    # so we look at the brightest part of the piece.
+    # Step 3: within the piece region, compare counts of bright and
+    # dark pixels. Many white pieces have a lighter interior while
+    # black pieces have darker interiors. The outline can be dark
+    # for both colors, so this focuses on interior pixels.
     bright_in_piece = np.count_nonzero(piece_pixels > 150)
     dark_in_piece = np.count_nonzero(piece_pixels < 100)
 
@@ -66,15 +83,15 @@ def detect_piece_color(square_image):
 
 def build_color_matrix(board_matrix, square_images):
     """
-    Build an 8x8 matrix of piece colors ('white'/'black'/None).
-    None means the square is empty.
+    Create an 8x8 matrix describing the detected color for each
+    occupied square.
 
-    Args:
-        board_matrix: 8x8 list of piece types
-        square_images: 8x8 list of cropped square images (BGR)
+    For each square where board_matrix indicates a piece (not
+    'empty'), the function runs detect_piece_color on the
+    corresponding cropped square image. Empty squares are left as
+    None.
 
-    Returns:
-        8x8 list of 'white' / 'black' / None
+    Returns an 8x8 list with values 'white', 'black' or None.
     """
     color_matrix = [[None] * 8 for _ in range(8)]
     for row in range(8):
@@ -87,16 +104,21 @@ def build_color_matrix(board_matrix, square_images):
 
 def build_fen(board_matrix, square_images, side_to_move='w'):
     """
-    Build a FEN string from the board.
+    Assemble a full FEN string from detected piece types and
+    square images.
 
-    Args:
-        board_matrix: 8x8 list of piece names ('Pawn', 'empty', ...).
-                      Row 0 = top of board (rank 8).
-        square_images: 8x8 list of the cropped square images (BGR).
-        side_to_move: 'w' or 'b'.
+    Parameters:
+        board_matrix: 8x8 list where each entry is a piece name
+            (e.g. 'Pawn', 'Rook') or the string 'empty'. Row 0 is the
+            top of the board (rank 8).
+        square_images: 8x8 list of the corresponding cropped square
+            images in BGR color order. These images are used to
+            determine piece color.
+        side_to_move: 'w' or 'b' for which side is to move.
 
     Returns:
-        A FEN string.
+        A FEN string including placement, side to move and default
+        values for castling/en-passant/halfmove/fullmove.
     """
     fen_rows = []
 
@@ -131,12 +153,15 @@ def build_fen(board_matrix, square_images, side_to_move='w'):
 
         fen_rows.append(fen_row)
 
-    # Join rows with '/'
+    # Join ranks into the placement field using '/' as the separator
     placement = "/".join(fen_rows)
 
-    # Full FEN: placement + side + castling + en passant + halfmove + fullmove
-    # We use safe defaults for the extra fields.
-    fen = f"{placement} {side_to_move} KQkq - 0 1"
+    # Construct the remainder of the FEN. For simplicity this code
+    # uses conservative defaults for castling rights and en-passant
+    # (no castling, no en-passant target) and sets the move counters
+    # to zero/one. Adjust these fields elsewhere if you have that
+    # information available.
+    fen = f"{placement} {side_to_move} - - 0 1"
     return fen
 
 
