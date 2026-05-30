@@ -1,17 +1,10 @@
-"""
-04_generate_synthetic.py
-Generates a synthetic dataset of digital chess pieces.
-
-FIXED: properly extracts BOTH white and black variants
-of every piece type (previous version dropped white
-pieces for Knight/Bishop/Rook since each side has 2).
-"""
+"""Create a synthetic dataset of chess pieces from a chessboard screenshot."""
 
 import random
 from pathlib import Path
 from PIL import Image, ImageEnhance
 
-# ---------- CONFIGURATION ----------
+# Paths and generation settings.
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 
@@ -26,13 +19,9 @@ CLASSES = ["Pawn", "Knight", "Bishop", "Rook", "Queen", "King"]
 random.seed(42)
 
 
-# ---------- STEP 1: CUT PIECE-SQUARES FROM SCREENSHOT ----------
+# Extract one example square for each piece type.
 def extract_pieces_from_screenshot(screenshot_path):
-    """
-    Cut piece-squares from a starting position.
-    Grabs BOTH a white and a black variant for each class.
-    Returns dict: {'Pawn': [white_img, black_img], ...}
-    """
+    """Return sample squares for each piece type from the board image."""
     board = Image.open(screenshot_path).convert("RGB")
     w, h = board.size
     sq = w // 8
@@ -41,18 +30,14 @@ def extract_pieces_from_screenshot(screenshot_path):
         left, top = col * sq, row * sq
         return board.crop((left, top, left + sq, top + sq))
 
-    # We pick ONE specific column per piece type.
-    # Back rank order: a=Rook b=Knight c=Bishop d=Queen
-    #                  e=King  f=Bishop g=Knight h=Rook
-    # column index ->  0       1        2        3
-    #                  4       5        6        7
+    # The back rank layout follows standard chess notation:
+    # a=Rook, b=Knight, c=Bishop, d=Queen, e=King, and so on.
     piece_columns = {
-        "Rook": 0,     # column a
-        "Knight": 1,   # column b
-        "Bishop": 2,   # column c
-        "Queen": 3,    # column d
-        "King": 4,     # column e
-        # Pawn handled separately (whole row of pawns)
+        "Rook": 0,
+        "Knight": 1,
+        "Bishop": 2,
+        "Queen": 3,
+        "King": 4,
     }
 
     pieces = {cls: [] for cls in CLASSES}
@@ -63,20 +48,20 @@ def extract_pieces_from_screenshot(screenshot_path):
         pieces[cls].append(white_piece)
         pieces[cls].append(black_piece)
 
-    # Pawns: row 1 = black pawns, row 6 = white pawns
-    pieces["Pawn"].append(get_square(6, 0))  # white pawn
-    pieces["Pawn"].append(get_square(1, 0))  # black pawn
+    # Pawns are taken from the second rank on each side.
+    pieces["Pawn"].append(get_square(6, 0))
+    pieces["Pawn"].append(get_square(1, 0))
 
-    print("  Extracted variants (should be 2 each: white + black):")
+    print("  Extracted variants:")
     for cls in CLASSES:
         print(f"    {cls:8s}: {len(pieces[cls])} variants")
 
     return pieces, sq
 
 
-# ---------- STEP 2: AUGMENT A PIECE-SQUARE ----------
+# Apply simple visual variations to each square.
 def augment(piece_square):
-    """Apply small random variations. Returns RGB IMG_SIZE image."""
+    """Add a few light random adjustments and resize the image."""
     img = piece_square.convert("RGB")
 
     brightness = random.uniform(0.80, 1.20)
@@ -97,10 +82,10 @@ def augment(piece_square):
     return img
 
 
-# ---------- MAIN ----------
+# Script entry point.
 def main():
     print("=" * 55)
-    print("SYNTHETIC DIGITAL CHESS PIECE GENERATOR (FIXED v2)")
+    print("SYNTHETIC DIGITAL CHESS PIECE GENERATOR")
     print("=" * 55)
 
     if not SCREENSHOT.exists():
@@ -118,7 +103,7 @@ def main():
         cls_dir = OUTPUT_DIR / cls
         cls_dir.mkdir(parents=True, exist_ok=True)
 
-        # Alternate white/black so each class is balanced
+        # Alternate between the available examples for each class.
         for i in range(IMAGES_PER_CLASS):
             variant = pieces[cls][i % len(pieces[cls])]
             img = augment(variant)
@@ -129,8 +114,7 @@ def main():
 
     print(f"\n✅ Done! Generated {total} synthetic images.")
     print(f"📁 Saved in: {OUTPUT_DIR}")
-    print("\n⚠️  CHECK: open data/synthetic_digital/Knight/ and confirm")
-    print("    you now see BOTH white and black knights, all SOLID.")
+    print("\n⚠️  Check data/synthetic_digital/Knight/ to make sure both colors are present.")
 
 
 if __name__ == "__main__":
