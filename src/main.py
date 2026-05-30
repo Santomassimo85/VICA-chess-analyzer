@@ -1,10 +1,17 @@
 """
 main.py
-The complete Chess Position Analyzer pipeline.
 
-Pipeline:
-  image -> board detection -> classification
-  -> rule-based correction -> FEN -> Stockfish
+This module implements the complete Chess Position Analyzer pipeline. It takes a 
+screenshot of a chess board and performs the following steps:
+  1. Load and validate the image
+  2. Detect the chess board and classify each piece
+  3. Handle board orientation (determine which side is at the bottom)
+  4. Apply rule-based validation and automatic corrections
+  5. Generate FEN notation from the detected position
+  6. Analyze the position using Stockfish engine
+  7. Present results with evaluation and best move recommendation
+
+The user is prompted for the side to move and board orientation before analysis begins.
 """
 
 import cv2
