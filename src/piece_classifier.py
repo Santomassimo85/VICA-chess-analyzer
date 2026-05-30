@@ -1,6 +1,10 @@
 """
 piece_classifier.py
-Loads the trained ResNet18 and predicts chess pieces from images.
+
+Utility for loading a trained ResNet-18 model and using it to predict
+which chess piece is present in a given image. The module provides a
+PieceClassifier class that wraps model loading, preprocessing and
+inference, and returns human-friendly results including probabilities.
 """
 
 import torch
@@ -9,87 +13,97 @@ from torchvision import models, transforms
 from PIL import Image
 from pathlib import Path
 
-# Constants (must match training!)
+# Constants (must match the values used during training)
 IMAGE_SIZE = 224
 NUM_CLASSES = 6
 
-# ImageNet normalization (same as training)
+# ImageNet normalization values used for model training
 NORMALIZE_MEAN = [0.485, 0.456, 0.406]
 NORMALIZE_STD = [0.229, 0.224, 0.225]
 
 
 class PieceClassifier:
-    """Classifies a chess piece image into one of 6 classes."""
+    """Classifier for single-piece images.
+
+    The class encapsulates a PyTorch model and preprocessing steps so
+    callers can load a checkpoint once and use the same object to make
+    repeated predictions on either image files or PIL Image objects.
+    """
 
     def __init__(self, model_path, device=None):
-        """
-        Load the trained model from a .pth file.
+        """Initialize the classifier and load model weights.
 
-        Args:
-            model_path: path to chess_classifier.pth
-            device: 'cuda' or 'cpu' (auto-detect if None)
+        Parameters
+        ----------
+        model_path : str or pathlib.Path
+            Path to a checkpoint file produced during training. The
+            checkpoint is expected to contain the keys 'model_state_dict'
+            and 'class_names'.
+        device : str, optional
+            Torch device to use for inference ('cuda' or 'cpu'). If None,
+            the constructor will pick an available GPU when possible.
         """
-        # Auto-detect device
+        # Choose a device for running the model
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.device = device
-        print(f"🔧 Using device: {self.device}")
+        # Note: printing helps when running scripts interactively
+        print(f"Using device: {self.device}")
 
-        # Load the checkpoint
+        # Load the training checkpoint from disk
         checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         self.class_names = checkpoint['class_names']
         self.test_accuracy = checkpoint.get('test_accuracy', 'N/A')
 
-        # Rebuild the model architecture (same as training!)
+        # Recreate the network architecture used during training
         self.model = models.resnet18(weights=None)  # no pre-trained, we load our own
         num_features = self.model.fc.in_features
         self.model.fc = nn.Linear(num_features, NUM_CLASSES)
 
-        # Load our trained weights
+        # Load the trained parameter values into the model
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model = self.model.to(self.device)
         self.model.eval()  # IMPORTANT: inference mode
 
-        # Preprocessing pipeline (same as training!)
+        # Image preprocessing pipeline. Must match the transforms used
+        # during training for correct results.
         self.transform = transforms.Compose([
             transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
             transforms.ToTensor(),
             transforms.Normalize(mean=NORMALIZE_MEAN, std=NORMALIZE_STD)
         ])
 
-        print(f"✅ Model loaded! Classes: {self.class_names}")
-        print(f"   Model test accuracy: {self.test_accuracy}")
+        # Informative message about the loaded model
+        print(f"Model loaded. Classes: {self.class_names}")
+        print(f"Model test accuracy: {self.test_accuracy}")
 
     def _predict_tensor(self, image):
-        """
-        Internal helper: runs the model on a PIL image.
-        Used by both predict() and predict_pil().
+        """Run the model on a single PIL Image and return results.
 
-        Args:
-            image: a PIL.Image object
-
-        Returns:
-            dict with 'class_name', 'confidence', 'all_probabilities'
+        The returned dictionary contains:
+        - 'class_name': the predicted class label (string)
+        - 'confidence': probability for the top prediction (float)
+        - 'all_probabilities': mapping from class name to probability
         """
-        # Make sure it's RGB
+        # Ensure the image has three color channels
         image = image.convert('RGB')
 
-        # Apply preprocessing (same as training)
+        # Apply the preprocessing transforms defined in __init__
         input_tensor = self.transform(image)
 
-        # Add batch dimension: (3, 224, 224) -> (1, 3, 224, 224)
+        # Add a batch dimension because the model expects batches
         input_batch = input_tensor.unsqueeze(0).to(self.device)
 
-        # Forward pass (no gradients needed)
+        # Perform a forward pass; gradients are not required for inference
         with torch.no_grad():
             outputs = self.model(input_batch)
             probabilities = torch.softmax(outputs, dim=1)
 
-        # Get the best class
+        # Determine the predicted class and its confidence
         confidence, predicted_idx = probabilities.max(1)
         predicted_class = self.class_names[predicted_idx.item()]
 
-        # Build readable output
+        # Build a simple mapping of class -> probability for the caller
         all_probs = {
             self.class_names[i]: float(probabilities[0][i])
             for i in range(len(self.class_names))
@@ -102,35 +116,26 @@ class PieceClassifier:
         }
 
     def predict(self, image_path):
-        """
-        Predict the chess piece from an image FILE.
+        """Predict from an image file given its path.
 
-        Args:
-            image_path: path to the image file (str or Path)
-
-        Returns:
-            dict with 'class_name', 'confidence', 'all_probabilities'
+        The image is opened with PIL and forwarded to the model.
         """
         image = Image.open(image_path)
         return self._predict_tensor(image)
 
     def predict_pil(self, pil_image):
-        """
-        Predict the chess piece from a PIL image IN MEMORY.
-        Used by board_analyzer.py to avoid saving 64 files to disk.
+        """Predict from a PIL Image object already in memory.
 
-        Args:
-            pil_image: a PIL.Image object
-
-        Returns:
-            dict with 'class_name', 'confidence', 'all_probabilities'
+        This avoids the overhead of saving temporary files when
+        performing multiple predictions (for example, when scanning a
+        chessboard and classifying each square).
         """
         return self._predict_tensor(pil_image)
 
 
-# Test block — runs only when you execute THIS file directly
+# When executed as a script, run a small self-test using a sample image
 if __name__ == "__main__":
-    # Robust path
+    # Build paths relative to this script for portability
     SCRIPT_DIR = Path(__file__).resolve().parent
     PROJECT_ROOT = SCRIPT_DIR.parent
 
@@ -140,8 +145,8 @@ if __name__ == "__main__":
     TEST_IMAGE = PROJECT_ROOT / "data" / "chess_split" / "test" / "Knight"
     test_img_name = list(TEST_IMAGE.glob("*"))[0]  # first image in folder
 
-    print(f"📂 Loading model from: {MODEL_PATH}")
-    print(f"🖼️  Testing on: {test_img_name.name}\n")
+    print(f"Loading model from: {MODEL_PATH}")
+    print(f"Testing on: {test_img_name.name}\n")
 
     # Create classifier
     classifier = PieceClassifier(MODEL_PATH)
@@ -149,10 +154,10 @@ if __name__ == "__main__":
     # Predict
     result = classifier.predict(test_img_name)
 
-    print("\n🎯 PREDICTION:")
+    print("\nPREDICTION:")
     print(f"   Class: {result['class_name']}")
     print(f"   Confidence: {result['confidence']*100:.2f}%")
-    print(f"\n📊 All probabilities:")
+    print("\nAll probabilities:")
     for cls, prob in sorted(result['all_probabilities'].items(),
                             key=lambda x: x[1], reverse=True):
         bar = "█" * int(prob * 50)
