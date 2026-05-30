@@ -1,34 +1,30 @@
 # VICA — Visual Chess Analyzer
 
-> Automated chess position analysis from images. Give VICA a screenshot of a
-> chess board, and it detects the position, reconstructs it in FEN notation,
-> and uses the Stockfish engine to suggest the best move.
+This project turns a screenshot of a chess board on lichess into a position that can be read by a chess engine. 
+Give VICA a board image, it finds the pieces, builds the FEN representation of the position, and asks Stockfish for the best move.
 
-This is the final project for the **Introduction to Computer Vision** course
-at EPICODE Institute of Technology.
-
+This repository contains the final project for the "Introduction to Computer Vision" course at EPICODE Institute of Technology.
 ---
 
 ## Overview
 
-VICA takes a digital chess board screenshot and runs it through a six-stage
-computer vision pipeline:
 
-1. **Image acquisition & square extraction** — the board image is split into
-   an 8×8 grid of 64 squares.
-2. **Occupancy detection** — classical CV (Canny edge density + colour
-   variance) decides which squares contain a piece.
-3. **Piece classification** — a fine-tuned ResNet-18 CNN classifies each
-   occupied square into one of six piece types.
-4. **Rule-based post-processing** — chess rules validate and correct obvious
-   classification errors.
-5. **FEN construction** — the detected board, with piece colours determined
-   by a brightness analysis, is converted into a FEN string.
-6. **Engine analysis** — Stockfish evaluates the position and returns the
-   best move.
+How it works
 
-The project combines **classical computer vision** (OpenCV) with **deep
-learning** (PyTorch) and **symbolic reasoning** (chess rules).
+VICA expects a clear digital screenshot of a chess board. It processes the image in six steps to produce a playable chess position:
+
+1. Image acquisition & square extraction — the input board image is divided into an 8×8 grid so each square can be inspected individually.
+2. Occupancy detection — simple image measures (edge density and colour
+   variation) are used to decide which squares contain a piece.
+3. Piece classification — occupied squares are classified into piece types using a trained convolutional network (ResNet-18 backbone).
+4. Rule-based post-processing — basic chess rules are applied to catch and fix obvious mistakes (for example, impossible piece counts).
+5. FEN construction — the detected board, with piece colours inferred from brightness, is converted into Forsyth–Edwards Notation (FEN).
+6. Engine analysis — the FEN string is given to Stockfish to evaluate the
+   position and suggest a move.
+
+The implementation mixes traditional image-processing steps (OpenCV), a
+trained classifier (PyTorch), and straightforward rule checks to improve
+robustness.
 
 ---
 
@@ -42,23 +38,26 @@ learning** (PyTorch) and **symbolic reasoning** (chess rules).
 | Rule-based correction | `rule_checker.py` | Chess-rule validation |
 | FEN + colour detection | `fen_builder.py` | Brightness analysis + FEN encoding |
 | Engine analysis | `chess_advisor.py` | Stockfish via UCI protocol |
-| Orchestration | `main.py` | End-to-end pipeline (command line) |
-| Web interface | `app.py` | Streamlit web app |
+| Orchestration | `main.py` | End-to-end pipeline |
 
-The classifier uses **two-stage fine-tuning**: first the ResNet-18 backbone is
-frozen and only the classifier head is trained; then the final residual block
-is unfrozen and trained with a reduced learning rate.
+Notes on the classifier
+
+The piece classifier was trained by first fitting the final classification
+layers and then fine-tuning the last residual block. This helps the network
+adapt to the chess-piece images without overfitting.
 
 ---
 
 ## Setup and Running Instructions
 
-### 1. Requirements
+Requirements
 
 - Python 3.10 or newer
-- The Stockfish chess engine executable
+- Stockfish chess engine (executable)
 
-### 2. Install dependencies
+Install dependencies
+
+On Windows:
 
 ```bash
 python -m venv venv
@@ -66,85 +65,76 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Download the trained models
+Add Stockfish
 
-The trained CNN model weights are hosted on the Hugging Face Hub:
+Download the Stockfish executable from https://stockfishchess.org/download/
+and place it in the repository under:
 
-**Models:** <https://huggingface.co/LucaSantomassimo/vica-chess-analyzer>
+engine/stockfish.exe
 
-Download `chess_classifier_digital.pth` and `chess_classifier.pth` and place
-them in the `models/` folder.
+Run the analyzer
 
-### 4. Add the Stockfish engine
-
-Download Stockfish from <https://stockfishchess.org/download/>, and place the
-executable at `engine/stockfish.exe`.
-
-### 5. Run the analyzer (command line)
+Put a screenshot into data/test_photos/ and run:
 
 ```bash
 python src/main.py
 ```
 
-### 6. Run the web app (optional)
+The script prompts for the image filename, which side is to move, and the
+board orientation. It prints the detected FEN and Stockfish's recommendation.
+
+You may pass the image path as an argument instead:
 
 ```bash
-streamlit run src/app.py
+python src/main.py data/test_photos/screenshot1.png
 ```
 
 ---
 
-## Project Structure
+Project layout
 
+```
 Chess-vision/
-├── src/
-│   ├── piece_classifier.py
-│   ├── board_analyzer.py
-│   ├── fen_builder.py
-│   ├── rule_checker.py
-│   ├── chess_advisor.py
-│   ├── main.py
-│   └── app.py                 # Streamlit web app
-├── notebooks/
-├── models/                    # see step 3 (Hugging Face)
-├── engine/                    # see step 4 (Stockfish)
-├── data/
-├── docs/                      # Technical Analysis Document (PDF)
+├── src/                       # main code
+│   ├── piece_classifier.py    # piece classifier (training & inference)
+│   ├── board_analyzer.py      # split board into squares + occupancy checks
+│   ├── fen_builder.py         # build FEN string and determine piece colours
+│   ├── rule_checker.py        # simple chess-rule validation and fixes
+│   ├── chess_advisor.py       # talk to Stockfish using UCI protocol
+│   └── main.py                # glue code: full pipeline and user prompts
+├── notebooks/                 # experiments, training and data prep
+├── models/                    # saved model weights (.pth)
+├── engine/                    # place Stockfish executable here
+├── data/                      # images and datasets
+├── docs/                      # report and analysis PDF
 ├── requirements.txt
 └── README.md
+```
 
 ---
 
-## Model Training
+Model training and results
 
-The classifier was trained on Google Colab using transfer learning from an
-ImageNet-pretrained ResNet-18. Two models were produced:
+The classifier was trained with transfer learning from an ImageNet-pretrained
+ResNet-18. Two variants were produced: one trained on photographs of physical
+pieces (about 85% test accuracy on that dataset) and another trained on
+synthetic digital pieces. Details, training scripts and logs are available in
+the notebooks/ folder.
 
-- physical-piece model (~85% test accuracy)
-- digital-piece model (synthetic dataset)
+Performance notes
 
-**Training notebook (Google Colab):**
-<https://colab.research.google.com/drive/1AloU4KelGsZWzucMlHSvW4gwhdM-6pz9?usp=sharing>
+- On clean, in-domain screenshots the pipeline usually reconstructs positions
+   correctly and Stockfish returns sensible moves.
+- Accuracy falls off on out-of-domain inputs (different piece styles, camera
+   photos of physical boards). This is a common domain-shift issue and is
+   discussed in the project report.
 
----
+Documentation
 
-## Summary of Results
+See docs/VICA_Technical_Analysis.pdf for the full project report: problem
+description, methods, experiments, failure cases and final thoughts.
 
-- ~85% per-class test accuracy on the physical-piece dataset
-- Full pipeline reconstructs in-domain positions and returns engine analysis
-- Performance degrades on out-of-domain inputs due to **domain shift** —
-  discussed in the Technical Analysis Document
+Usage and ethics
 
----
-
-## Documentation
-
-Complete **Technical Analysis Document** in `docs/VICA_Technical_Analysis.pdf`.
-
----
-
-## Ethical Note
-
-VICA is intended for **post-game analysis, study, and training only**. Using
-chess-engine assistance during live rated games violates the rules of all
-major chess platforms and federations.
+This tool is intended for analysis, training and study. Do not use it to
+cheat in live rated games or otherwise violate the rules of chess platforms.
