@@ -1,10 +1,16 @@
 """
 rule_checker.py
-Post-processing: validates and corrects a detected chess
-position using the structural rules of chess.
 
-This catches errors from the CNN classification by applying
-domain knowledge (king count, pawn limits, pawn placement).
+This module validates and corrects chess positions detected by the CNN classifier.
+It applies the fundamental rules of chess to catch and fix common classification errors.
+
+The main functions check for:
+- Incorrect piece counts (each player must have exactly one king)
+- Piece limits (e.g., max 8 pawns per color)
+- Impossible pawn placements (pawns cannot exist on the first or eighth rank)
+
+When errors are detected, the module can automatically correct obvious mistakes,
+such as converting misclassified pawns on back ranks to rooks.
 """
 
 
